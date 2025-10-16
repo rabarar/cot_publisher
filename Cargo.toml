@@ -26,6 +26,7 @@ tokio = { version = "1.47.1", features = ["net", "rt", "sync", "io-util", "time"
 url = "2.5.7"
 varint-rs = "2.2"
 thiserror = "2.0.17"
+openssl = "0.10.72"
 
 [build-dependencies]
 prost-build = "0.14"
