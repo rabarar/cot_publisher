@@ -19,7 +19,9 @@ use std::io::Read;
 pub enum Source {
     None,
     File(String),
-    FileP12(String, String),
+    CertFileP12(String, String),
+    KeyFileP12(String, String),
+    CARootFileP12(String, String),
     String(String),
 }
 
@@ -29,7 +31,9 @@ impl Source {
         match self {
             Source::None => Ok(String::new()),
             Source::File(path) => std::fs::read_to_string(path),
-            Source::FileP12(path, passwd) => read_pkcs12_to_string(path, passwd),
+            Source::CertFileP12(path, passwd) => read_pkcs12_cert_to_string(path, passwd),
+            Source::KeyFileP12(path, passwd) => read_pkcs12_key_to_string(path, passwd),
+            Source::CARootFileP12(path, passwd) => read_pkcs12_ca_root_to_string(path, passwd),
             Source::String(content) => Ok(content.clone()),
         }
     }
@@ -175,7 +179,7 @@ pub fn parse_certificates<'a>(cert_pem: String) -> Result<Vec<CertificateDer<'a>
 
 // -----
 
-pub fn read_pkcs12_to_string(
+pub fn read_pkcs12_cert_to_string(
     pkcs12_filename: &str,
     pkcs12_passwd: &str,
 ) -> Result<String, std::io::Error> {
@@ -195,20 +199,7 @@ pub fn read_pkcs12_to_string(
 
     // These are accessible:
     let leaf_cert:Option<X509> = parsed.cert; // openssl::x509::X509
-    let private_key:Option<PKey<Private>> = parsed.pkey; // openssl::pkey::PKey
-    let ca_chain:Option<Stack<X509>> = parsed.ca; // Option<Vec<openssl::x509::X509>>
-
     let cert_pem_string:String;
-    let mut ca_cert_pem_string:String;
-    let pkey_pem_string:String;
-
-    if let Some(pkey) = private_key {
-        let pkey_pem_bytes = pkey.private_key_to_pem_pkcs8()?;
-        pkey_pem_string = String::from_utf8(pkey_pem_bytes)
-            .expect("failed to convert to utf8");
-    } else {
-        pkey_pem_string = "".to_string();
-    }
         
     if let Some(cert) = leaf_cert {
         let cert_pem_bytes = cert.to_pem()?;
@@ -218,6 +209,64 @@ pub fn read_pkcs12_to_string(
         cert_pem_string = "".to_string();
     }
 
+    Ok(cert_pem_string)
+}
+
+pub fn read_pkcs12_key_to_string(
+    pkcs12_filename: &str,
+    pkcs12_passwd: &str,
+) -> Result<String, std::io::Error> {
+
+    // Load the PKCS#12 file
+    let mut file = File::open(&pkcs12_filename)
+        .expect(format!("Failed to open PKCS12 file: {}", pkcs12_filename).as_str());
+
+    let mut pkcs12_data = Vec::new();
+    file.read_to_end(&mut pkcs12_data)
+        .expect("Failed to read PKCS12 file");
+
+    // Load the identity using the PKCS#12 file and password
+    let parsed = Pkcs12::from_der(&pkcs12_data)?
+        .parse2(&pkcs12_passwd)
+        .expect(format!("Failed to load identity: {}", pkcs12_filename).as_str());
+
+    let private_key:Option<PKey<Private>> = parsed.pkey; // openssl::pkey::PKey
+
+    let pkey_pem_string:String;
+
+    if let Some(pkey) = private_key {
+        let pkey_pem_bytes = pkey.private_key_to_pem_pkcs8()?;
+        pkey_pem_string = String::from_utf8(pkey_pem_bytes)
+            .expect("failed to convert to utf8");
+    } else {
+        pkey_pem_string = "".to_string();
+    }
+
+    Ok(pkey_pem_string)
+        
+}
+
+pub fn read_pkcs12_ca_root_to_string(
+    pkcs12_filename: &str,
+    pkcs12_passwd: &str,
+) -> Result<String, std::io::Error> {
+
+    // Load the PKCS#12 file
+    let mut file = File::open(&pkcs12_filename)
+        .expect(format!("Failed to open PKCS12 file: {}", pkcs12_filename).as_str());
+
+    let mut pkcs12_data = Vec::new();
+    file.read_to_end(&mut pkcs12_data)
+        .expect("Failed to read PKCS12 file");
+
+    // Load the identity using the PKCS#12 file and password
+    let parsed = Pkcs12::from_der(&pkcs12_data)?
+        .parse2(&pkcs12_passwd)
+        .expect(format!("Failed to load identity: {}", pkcs12_filename).as_str());
+
+    let mut ca_cert_pem_string:String;
+    let ca_chain:Option<Stack<X509>> = parsed.ca; // Option<Vec<openssl::x509::X509>>
+        
     if let Some(ca) = ca_chain {
         ca_cert_pem_string = "".to_string();
         for cert in ca.into_iter() {
@@ -229,5 +278,7 @@ pub fn read_pkcs12_to_string(
         ca_cert_pem_string = "".to_string();
     }
 
-    Ok([cert_pem_string, ca_cert_pem_string, pkey_pem_string].concat())
+    Ok(ca_cert_pem_string)
+
 }
+
